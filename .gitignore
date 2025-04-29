@@ -1,0 +1,6 @@
+.idea/
+*.log
+*.env
+/filtered_twitter_posts.csv
+/misc.xml
+/pythonCrawling.iml
