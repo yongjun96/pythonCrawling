@@ -118,7 +118,7 @@ try:
         EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='SearchBox_Search_Input']"))
     )
     search_input.clear()
-    search_input.send_keys("koreanlanguage")
+    search_input.send_keys("korean language")
     search_input.send_keys(Keys.ENTER)  # 엔터키 입력
     print("검색어 입력 완료")
 except Exception as e:
@@ -192,11 +192,11 @@ while attempt < max_attempts:
     if new_authors:
         print(f"   └ 수집된 작성자: {', '.join(new_authors)}")
 
-    if new_keys == previous_batch:
+    if len(collected_posts) == len(previous_batch):
         same_batch_count += 1
     else:
         same_batch_count = 0
-    previous_batch = new_keys
+    previous_batch = list(collected_posts)  # shallow copy
 
     if same_batch_count >= 4:
         print("✅ 더 이상 새로운 게시물이 없습니다. 수집 종료.")
@@ -216,7 +216,7 @@ for post in collected_posts:
     filtered_posts.append(post)
 
 # ✅ CSV로 저장
-with open("filtered_twitter_posts.csv", mode='w', newline='', encoding='utf-8') as file:
+with open("filtered_twitter_posts3.csv", mode='w', newline='', encoding='utf-8') as file:
     writer = csv.DictWriter(file, fieldnames=["username", "time", "text", "hashtags"])
     writer.writeheader()
     for post in filtered_posts:
