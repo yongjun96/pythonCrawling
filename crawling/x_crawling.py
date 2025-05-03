@@ -1,31 +1,41 @@
-import re
+import os
+import random
+import tempfile
+import time
 import csv
+import subprocess
 
+from selenium.webdriver.common.by import By
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
 
 
-import time
-
 options = Options()
 # options.add_argument("user-data-dir=C:\\Users\\practice960426@gmail.com\\AppData\\Local\\Google\\Chrome\\User Data")  # 맥용
-options.add_argument('--user-data-dir=C:\\crawling')  # 윈도우용
+# options.add_argument('--user-data-dir=C:\\crawling')  # 윈도우용
 # options.add_argument("--headless=new")  # 필요 시 헤드리스 모드
 
+temp_profile = tempfile.mkdtemp()
+options.add_argument(f"--user-data-dir={temp_profile}")
+
+options.add_argument("--disable-blink-features=AutomationControlled")  # 셀레니움 탐지 회피
+options.add_argument("--user-data-dir=/path/to/fresh/profile")
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
-options.add_argument("--disable-blink-features=AutomationControlled")
-
+options.add_argument("--disable-infobars")
+options.add_argument("--start-maximized")
+options.add_experimental_option("excludeSwitches", ["enable-automation"])
+options.add_experimental_option('useAutomationExtension', False)
+options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/123.0.0.0 Safari/537.36")
 
 driver = webdriver.Chrome(options=options)
+# driver.get("https://twitter.com")
 driver.get("https://x.com")
 
 time.sleep(2)
-
 
 # try:
 #     # 로그인 버튼이 클릭 가능할 때까지 기다림
@@ -93,7 +103,7 @@ time.sleep(2)
 #     password_input = WebDriverWait(driver, 10).until(
 #         EC.presence_of_element_located((By.NAME, "password"))
 #     )
-#     password_input.send_keys("dydwns!1004")  # 비밀번호 입력
+#     password_input.send_keys("비밀번호 입력해.")  # 비밀번호 입력
 #     print("비밀번호 입력 완료")
 # except Exception as e:
 #     print("오류 발생:", e)
@@ -112,155 +122,219 @@ time.sleep(2)
 
 # ------------------------- 로그인 완료
 
-try:
-    # Search 인풋 요소가 로드될 때까지 기다림
-    search_input = WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='SearchBox_Search_Input']"))
-    )
-    search_input.clear()
-    search_input.send_keys("korean")
-    search_input.send_keys(Keys.ENTER)  # 엔터키 입력
-    print("검색어 입력 완료")
-except Exception as e:
-    print("오류 발생:", e)
-
-time.sleep(2)
-
-tweets = driver.find_elements(By.XPATH, '//article[@role="article"]')
-
-time.sleep(2)
-
 # ----------------------------------------- 여기 부터 본문 크롤링
 
-from selenium.webdriver.common.by import By
-import csv
-import time
+# 오토 핫키로 vpn 체인지
+def change_protonvpn_server():
+    ahk_script = r"C:/Users/pract/IdeaProjects/pythonCrawling/crawling/protonvpn_change_server.ahk"  # .ahk 경로
+    ahk_exe = r"C:/Program Files/AutoHotkey/v2/AutoHotkey.exe"  # AHK 설치 경로
 
-# ✅ 검색어 리스트 (원하는 만큼 추가 가능)
-search_keywords = ["korean"]
+    try:
+        subprocess.Popen([ahk_exe, ahk_script])
+        print("🔁 ProtonVPN 서버 변경 시도 중...")
+        time.sleep(10)  # VPN 변경/연결 기다리기
+    except Exception as e:
+        print(f"❌ VPN 변경 실패: {e}")
+
+# ✅ 새 게시물 로딩 여부 확인 함수
+def wait_for_new_articles(previous_count, timeout=10):
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        current_articles = driver.find_elements(By.XPATH, '//article[@role="article"]')
+        if len(current_articles) > previous_count:
+            return True
+        time.sleep(0.5)
+    return False
+
+# ✅ 로그 기록 함수
+def log(message, level="INFO"):
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    formatted = f"[{timestamp}] [{level}] {message}"
+    print(formatted)
+    with open("crawl_log.txt", "a", encoding="utf-8") as f:
+        f.write(formatted + "\n")
+
+# ✅ 기존 CSV에서 저장된 key(username + text) 불러오기
+def load_existing_keys(csv_path):
+    existing_keys = set()
+    if os.path.exists(csv_path):
+        with open(csv_path, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                key = f"{row['username']}_{row['text']}"
+                existing_keys.add(key)
+    return existing_keys
+
+# ✅ 검색어 리스트
+search_keywords = ["learn_korean"]
 
 for keyword in search_keywords:
-    print(f"\n🔍 '{keyword}' 검색 시작")
+    log(f"🔍 '{keyword}' 검색 시작")
+    output_filename = f"hashtag_{keyword.replace(' ', '_')}_post.csv"
+    existing_keys = load_existing_keys(output_filename)
+    seen_keys = set(existing_keys)
 
-    # ✅ 검색창에 검색어 입력
     try:
         search_input = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='SearchBox_Search_Input']"))
         )
         search_input.clear()
+        time.sleep(random.uniform(1, 2.5))
         search_input.send_keys(keyword)
+        time.sleep(random.uniform(1, 2.5))
         search_input.send_keys(Keys.ENTER)
-        print("   └ 검색어 입력 완료")
+        time.sleep(random.uniform(1, 2.5))
+        log("   └ 검색어 입력 완료")
     except Exception as e:
-        print("   ❌ 검색창 오류:", e)
+        log(f"   ❌ 검색창 오류: {e}", level="ERROR")
         continue
 
-    time.sleep(2)
-
-    # ✅ 스크롤 및 게시물 수집
-    scroll_pause_time = 1.5
     scroll_step = 500
     max_attempts = 200
-    scroll_retry_limit = 5
+    scroll_retry_limit = 13
 
     attempt = 0
     same_batch_count = 0
-    previous_batch = []
     scroll_retries = 0
+    no_post_growth_count = 0
     collected_posts = []
+    previous_batch = []
+    same_authors_repeat_count = 0
+    last_author_set = None
 
-    while attempt < max_attempts:
-        attempt += 1
-        new_keys = []
-        new_authors = []
+    try:
+        while attempt < max_attempts:
+            attempt += 1
+            new_posts = []
+            new_authors = []
 
-        articles = driver.find_elements(By.XPATH, '//article[@role="article"]')
-        articles_with_position = [
-            (article, driver.execute_script("return arguments[0].getBoundingClientRect().top;", article))
-            for article in articles
-        ]
-        articles_sorted = sorted(articles_with_position, key=lambda x: x[1])
+            articles = driver.find_elements(By.XPATH, '//article[@role="article"]')
+            articles_with_position = [
+                (article, driver.execute_script("return arguments[0].getBoundingClientRect().top;", article))
+                for article in articles
+            ]
+            articles_sorted = sorted(articles_with_position, key=lambda x: x[1])
 
-        for article, _ in articles_sorted:
-            try:
-                tweet_container = article.find_element(By.XPATH, ".//div[@data-testid='tweetText']")
-                hashtag_elements = article.find_elements(
-                    By.XPATH,
-                    ".//a[contains(@href, '/hashtag/') and contains(@class, 'css-1jxf684')]"
-                )
-                hashtags = [tag.text for tag in hashtag_elements]
-                for tag in hashtag_elements:
-                    driver.execute_script("arguments[0].remove();", tag)
+            for article, _ in articles_sorted:
+                try:
+                    tweet_container = article.find_element(By.XPATH, ".//div[@data-testid='tweetText']")
+                    hashtag_elements = article.find_elements(
+                        By.XPATH,
+                        ".//a[contains(@href, '/hashtag/') and contains(@class, 'css-1jxf684')]"
+                    )
+                    hashtags = [tag.text for tag in hashtag_elements]
+                    for tag in hashtag_elements:
+                        driver.execute_script("arguments[0].remove();", tag)
 
-                tweet_text = tweet_container.text.strip()
-                username_element = article.find_element(By.XPATH, ".//span[contains(@class,'css-1jxf684')]")
-                username = username_element.text.strip() if username_element else "이름 없음"
+                    tweet_text = tweet_container.text.strip()
+                    username_element = article.find_element(By.XPATH, ".//span[contains(@class,'css-1jxf684')]")
+                    username = username_element.text.strip() if username_element else "이름 없음"
 
-                collected_posts.append({
-                    "username": username,
-                    "text": tweet_text,
-                    "hashtags": hashtags,
-                    "time": article.find_element(By.XPATH, ".//time").get_attribute("datetime") if article.find_elements(By.XPATH, ".//time") else "작성일 없음"
-                })
+                    post = {
+                        "username": username,
+                        "text": tweet_text,
+                        "hashtags": hashtags,
+                        "time": article.find_element(By.XPATH, ".//time").get_attribute("datetime") if article.find_elements(By.XPATH, ".//time") else "작성일 없음"
+                    }
 
-                key = f"{username}_{tweet_text}"
-                new_keys.append(key)
-                new_authors.append(username)
+                    key = f"{username}_{tweet_text}"
+                    if key not in seen_keys:
+                        seen_keys.add(key)
+                        collected_posts.append(post)
+                        new_posts.append(post)
+                        new_authors.append(username)
 
-            except Exception:
-                continue
+                except Exception as e:
+                    log(f"트윗 파싱 중 예외 발생: {e}", level="WARNING")
+                    continue
 
-        print(f"   🔁 스크롤 {attempt}회차 - 새 게시물 {len(new_authors)}개 (총 {len(collected_posts)}개)")
-        if new_authors:
-            print(f"      └ 수집된 작성자: {', '.join(new_authors)}")
+            log(
+                f"   ↺ 스크롤 {attempt}회차 - 새 게시물 {len(new_posts)}개 (총 {len(collected_posts)}개)\n"
+                f"      └ 작성자: {', '.join(new_authors) if new_authors else '없음'}"
+            )
 
-        if len(collected_posts) == len(previous_batch):
-            same_batch_count += 1
-        else:
-            same_batch_count = 0
-            scroll_retries = 0
-
-        previous_batch = list(collected_posts)
-
-        if same_batch_count >= 4:
-            if scroll_retries >= scroll_retry_limit:
-                print("   🛑 더 이상 게시물이 없어 수집 종료")
-                break
+            current_author_set = tuple(sorted(new_authors))
+            if current_author_set == last_author_set:
+                same_authors_repeat_count += 1
             else:
-                print(f"   ⏫ 스크롤 재시도 중... ({scroll_retries + 1}/{scroll_retry_limit})")
-                driver.execute_script("window.scrollBy(0, -1000);")
-                time.sleep(scroll_pause_time)
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(scroll_pause_time)
+                same_authors_repeat_count = 1
+            last_author_set = current_author_set
+            force_scroll = same_authors_repeat_count >= 2
+
+            if len(collected_posts) == len(previous_batch):
+                same_batch_count += 1
+            else:
+                same_batch_count = 0
+                scroll_retries = 0
+                no_post_growth_count = 0
+
+            previous_batch = list(collected_posts)
+
+            if scroll_retries >= 5:
+                log("⚠ ProtonVPN 서버 변경 시도 중 (스크롤 재시도 5회 초과)", level="WARNING")
+                change_protonvpn_server()
+                time.sleep(10)
+
+            if same_batch_count >= 1 or force_scroll:
                 scroll_retries += 1
+                reason = "동일 작성자 구성 2회 반복 감지" if force_scroll else "새 게시물 없음"
+                log(f"   ⬆ 스크롤 재시도 중... ({scroll_retries}/{scroll_retry_limit}) - 이유: {reason}")
+
+                before_scroll_count = len(driver.find_elements(By.XPATH, '//article[@role="article"]'))
+
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(random.uniform(1.2, 2.5))
+
+                loaded_time = random.randint(4, 6)
+                loaded = wait_for_new_articles(before_scroll_count, timeout=loaded_time)
+
+                if not loaded:
+                    amount = random.randint(5000, 10000)
+                    driver.execute_script(f"window.scrollBy(0, -{amount});")
+                    time.sleep(random.uniform(1.2, 2.5))
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(random.uniform(1.2, 2.5))
+
+                    after_scroll_count = len(driver.find_elements(By.XPATH, '//article[@role="article"]'))
+                    if after_scroll_count == before_scroll_count:
+                        no_post_growth_count += 1
+                    else:
+                        no_post_growth_count = 0
+
+                    if no_post_growth_count >= 13:
+                        log("   ⛔ 게시물 증가 없음 13회 반복 → 종료", level="WARNING")
+                        break
+
                 continue
 
-        driver.execute_script(f"window.scrollBy(0, {scroll_step});")
-        time.sleep(scroll_pause_time)
+            driver.execute_script(f"window.scrollBy(0, {scroll_step});")
+            time.sleep(random.uniform(1, 2.5))
 
-    # ✅ 중복 제거
-    seen_keys = set()
-    filtered_posts = []
-    for post in collected_posts:
-        key = f"{post['username']}_{post['text']}"
-        if key in seen_keys:
+    except Exception as e:
+        log(f"스크롤 루프 중 예외 발생: {e}", level="ERROR")
+
+    finally:
+        if not collected_posts:
+            log("📭 저장할 게시물이 없습니다.", level="WARNING")
             continue
-        seen_keys.add(key)
-        filtered_posts.append(post)
 
-    # ✅ 검색어 기반 파일명 (공백 제거)
-    safe_keyword = keyword.replace(" ", "_")
-    output_filename = f"{safe_keyword}_twitter_posts.csv"
+        try:
+            with open(output_filename, mode='a', newline='', encoding='utf-8') as file:
+                writer = csv.DictWriter(file, fieldnames=["username", "time", "text", "hashtags"])
+                if not os.path.getsize(output_filename):
+                    writer.writeheader()
+                for post in collected_posts:
+                    writer.writerow({
+                        "username": post["username"],
+                        "time": post["time"],
+                        "text": post["text"],
+                        "hashtags": ', '.join(post["hashtags"])
+                    })
 
-    with open(output_filename, mode='w', newline='', encoding='utf-8') as file:
-        writer = csv.DictWriter(file, fieldnames=["username", "time", "text", "hashtags"])
-        writer.writeheader()
-        for post in filtered_posts:
-            writer.writerow({
-                "username": post["username"],
-                "time": post["time"],
-                "text": post["text"],
-                "hashtags": ', '.join(post["hashtags"])
-            })
+            log(f"📁 저장 완료: {output_filename} (이번에 저장된 {len(collected_posts)}개 게시물)")
+        except Exception as e:
+            log(f"CSV 저장 중 오류 발생: {e}", level="ERROR")
 
-    print(f"📁 저장 완료: {output_filename} (총 {len(filtered_posts)}개 게시물)")
+
+
