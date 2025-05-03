@@ -118,7 +118,7 @@ try:
         EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='SearchBox_Search_Input']"))
     )
     search_input.clear()
-    search_input.send_keys("korean language")
+    search_input.send_keys("korean")
     search_input.send_keys(Keys.ENTER)  # 엔터키 입력
     print("검색어 입력 완료")
 except Exception as e:
@@ -136,96 +136,131 @@ from selenium.webdriver.common.by import By
 import csv
 import time
 
-collected_posts = []
-scroll_pause_time = 1.5
-scroll_step = 500
-max_attempts = 200
+# ✅ 검색어 리스트 (원하는 만큼 추가 가능)
+search_keywords = ["korean"]
 
-attempt = 0
-same_batch_count = 0
-previous_batch = []
+for keyword in search_keywords:
+    print(f"\n🔍 '{keyword}' 검색 시작")
 
-while attempt < max_attempts:
-    attempt += 1
-    new_keys = []
-    new_authors = []
+    # ✅ 검색창에 검색어 입력
+    try:
+        search_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='SearchBox_Search_Input']"))
+        )
+        search_input.clear()
+        search_input.send_keys(keyword)
+        search_input.send_keys(Keys.ENTER)
+        print("   └ 검색어 입력 완료")
+    except Exception as e:
+        print("   ❌ 검색창 오류:", e)
+        continue
 
-    # 현재 화면 내 article들 + 위치 기반 정렬
-    articles = driver.find_elements(By.XPATH, '//article[@role="article"]')
-    articles_with_position = [
-        (article, driver.execute_script("return arguments[0].getBoundingClientRect().top;", article))
-        for article in articles
-    ]
-    articles_sorted = sorted(articles_with_position, key=lambda x: x[1])
+    time.sleep(2)
 
-    for article, _ in articles_sorted:
-        try:
-            tweet_container = article.find_element(By.XPATH, ".//div[@data-testid='tweetText']")
-            hashtag_elements = article.find_elements(
-                By.XPATH,
-                ".//a[contains(@href, '/hashtag/') and contains(@class, 'css-1jxf684')]"
-            )
-            hashtags = [tag.text for tag in hashtag_elements]
-            for tag in hashtag_elements:
-                driver.execute_script("arguments[0].remove();", tag)
+    # ✅ 스크롤 및 게시물 수집
+    scroll_pause_time = 1.5
+    scroll_step = 500
+    max_attempts = 200
+    scroll_retry_limit = 5
 
-            tweet_text = tweet_container.text.strip()
-            username_element = article.find_element(By.XPATH, ".//span[contains(@class,'css-1jxf684')]")
-            username = username_element.text.strip() if username_element else "이름 없음"
+    attempt = 0
+    same_batch_count = 0
+    previous_batch = []
+    scroll_retries = 0
+    collected_posts = []
 
-            # ✅ 중복 제거 없이 저장
-            collected_posts.append({
-                "username": username,
-                "text": tweet_text,
-                "hashtags": hashtags,
-                "time": article.find_element(By.XPATH, ".//time").get_attribute("datetime") if article.find_elements(By.XPATH, ".//time") else "작성일 없음"
+    while attempt < max_attempts:
+        attempt += 1
+        new_keys = []
+        new_authors = []
+
+        articles = driver.find_elements(By.XPATH, '//article[@role="article"]')
+        articles_with_position = [
+            (article, driver.execute_script("return arguments[0].getBoundingClientRect().top;", article))
+            for article in articles
+        ]
+        articles_sorted = sorted(articles_with_position, key=lambda x: x[1])
+
+        for article, _ in articles_sorted:
+            try:
+                tweet_container = article.find_element(By.XPATH, ".//div[@data-testid='tweetText']")
+                hashtag_elements = article.find_elements(
+                    By.XPATH,
+                    ".//a[contains(@href, '/hashtag/') and contains(@class, 'css-1jxf684')]"
+                )
+                hashtags = [tag.text for tag in hashtag_elements]
+                for tag in hashtag_elements:
+                    driver.execute_script("arguments[0].remove();", tag)
+
+                tweet_text = tweet_container.text.strip()
+                username_element = article.find_element(By.XPATH, ".//span[contains(@class,'css-1jxf684')]")
+                username = username_element.text.strip() if username_element else "이름 없음"
+
+                collected_posts.append({
+                    "username": username,
+                    "text": tweet_text,
+                    "hashtags": hashtags,
+                    "time": article.find_element(By.XPATH, ".//time").get_attribute("datetime") if article.find_elements(By.XPATH, ".//time") else "작성일 없음"
+                })
+
+                key = f"{username}_{tweet_text}"
+                new_keys.append(key)
+                new_authors.append(username)
+
+            except Exception:
+                continue
+
+        print(f"   🔁 스크롤 {attempt}회차 - 새 게시물 {len(new_authors)}개 (총 {len(collected_posts)}개)")
+        if new_authors:
+            print(f"      └ 수집된 작성자: {', '.join(new_authors)}")
+
+        if len(collected_posts) == len(previous_batch):
+            same_batch_count += 1
+        else:
+            same_batch_count = 0
+            scroll_retries = 0
+
+        previous_batch = list(collected_posts)
+
+        if same_batch_count >= 4:
+            if scroll_retries >= scroll_retry_limit:
+                print("   🛑 더 이상 게시물이 없어 수집 종료")
+                break
+            else:
+                print(f"   ⏫ 스크롤 재시도 중... ({scroll_retries + 1}/{scroll_retry_limit})")
+                driver.execute_script("window.scrollBy(0, -1000);")
+                time.sleep(scroll_pause_time)
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(scroll_pause_time)
+                scroll_retries += 1
+                continue
+
+        driver.execute_script(f"window.scrollBy(0, {scroll_step});")
+        time.sleep(scroll_pause_time)
+
+    # ✅ 중복 제거
+    seen_keys = set()
+    filtered_posts = []
+    for post in collected_posts:
+        key = f"{post['username']}_{post['text']}"
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        filtered_posts.append(post)
+
+    # ✅ 검색어 기반 파일명 (공백 제거)
+    safe_keyword = keyword.replace(" ", "_")
+    output_filename = f"{safe_keyword}_twitter_posts.csv"
+
+    with open(output_filename, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.DictWriter(file, fieldnames=["username", "time", "text", "hashtags"])
+        writer.writeheader()
+        for post in filtered_posts:
+            writer.writerow({
+                "username": post["username"],
+                "time": post["time"],
+                "text": post["text"],
+                "hashtags": ', '.join(post["hashtags"])
             })
 
-            key = f"{username}_{tweet_text}"
-            new_keys.append(key)
-            new_authors.append(username)
-
-        except Exception:
-            continue
-
-    print(f"🔁 스크롤 {attempt}회차 - 새 게시물 {len(new_authors)}개 (총 {len(collected_posts)}개)")
-    if new_authors:
-        print(f"   └ 수집된 작성자: {', '.join(new_authors)}")
-
-    if len(collected_posts) == len(previous_batch):
-        same_batch_count += 1
-    else:
-        same_batch_count = 0
-    previous_batch = list(collected_posts)  # shallow copy
-
-    if same_batch_count >= 4:
-        print("✅ 더 이상 새로운 게시물이 없습니다. 수집 종료.")
-        break
-
-    driver.execute_script(f"window.scrollBy(0, {scroll_step});")
-    time.sleep(scroll_pause_time)
-
-# ✅ 수집 후 중복 제거: 작성자 + 본문 기준
-seen_keys = set()
-filtered_posts = []
-for post in collected_posts:
-    key = f"{post['username']}_{post['text']}"
-    if key in seen_keys:
-        continue
-    seen_keys.add(key)
-    filtered_posts.append(post)
-
-# ✅ CSV로 저장
-with open("filtered_twitter_posts3.csv", mode='w', newline='', encoding='utf-8') as file:
-    writer = csv.DictWriter(file, fieldnames=["username", "time", "text", "hashtags"])
-    writer.writeheader()
-    for post in filtered_posts:
-        writer.writerow({
-            "username": post["username"],
-            "time": post["time"],
-            "text": post["text"],
-            "hashtags": ', '.join(post["hashtags"])
-        })
-
-print(f"📁 저장 완료: filtered_twitter_posts.csv (총 {len(filtered_posts)}개 게시물)")
-
+    print(f"📁 저장 완료: {output_filename} (총 {len(filtered_posts)}개 게시물)")
