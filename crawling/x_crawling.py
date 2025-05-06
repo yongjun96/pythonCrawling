@@ -152,14 +152,14 @@ def log(message, level="INFO"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     formatted = f"[{timestamp}] [{level}] {message}"
     print(formatted)
-    with open("crawl_log.txt", "a", encoding="utf-8") as f:
+    with open("crawl_log.txt", "a", encoding="utf-8-sig") as f:
         f.write(formatted + "\n")
 
 # ✅ 기존 CSV에서 저장된 key(username + text) 불러오기
 def load_existing_keys(csv_path):
     existing_keys = set()
     if os.path.exists(csv_path):
-        with open(csv_path, newline='', encoding='utf-8') as f:
+        with open(csv_path, newline='', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 key = f"{row['username']}_{row['text']}"
@@ -320,7 +320,7 @@ for keyword in search_keywords:
             continue
 
         try:
-            with open(output_filename, mode='a', newline='', encoding='utf-8') as file:
+            with open(output_filename, mode='a', newline='', encoding='utf-8-sig') as file:
                 writer = csv.DictWriter(file, fieldnames=["username", "time", "text", "hashtags"])
                 if not os.path.getsize(output_filename):
                     writer.writeheader()
